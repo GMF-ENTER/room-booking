@@ -1,4 +1,4 @@
-var GAS_URL = 'https://script.google.com/macros/s/AKfycbyIzTJUg-_tbWNChTrzb-5hIUfomFIuOz1-kmeedcxkgnnxJLmIdgmc2uPx0dOzi39n/exec';
+﻿var GAS_URL = 'https://script.google.com/macros/s/AKfycbyIzTJUg-_tbWNChTrzb-5hIUfomFIuOz1-kmeedcxkgnnxJLmIdgmc2uPx0dOzi39n/exec';
 
 // EmailJS設定
 var EMAILJS_SERVICE_ID  = 'service_8cqy10b';
@@ -632,22 +632,35 @@ function buildTL(dateStr) {
       return bk.room === rk && bk.date === dateStr && getTimes(bk).length > 0;
     });
 
-    // 重複検出：各予約が占める分の集合
+    // 全セグメントをレーン割り当て（重複は別レーンへ）
+    var LANE_H = 28;
+    var laneEnds = [];
+    var blocks = [];
     dayBookings.forEach(function(bk) {
       var times = getTimes(bk).map(function(t){ return t.trim(); });
-      var segs = buildSegments(times);
-      segs.forEach(function(seg) {
-        var startMin = seg[0];
-        var endMin   = seg[1];
-        var leftPct  = ((startMin - TL_START) / TL_SPAN * 100).toFixed(4);
-        var widthPct = ((endMin   - startMin) / TL_SPAN * 100).toFixed(4);
-        var bl = document.createElement('div');
-        bl.className = 'tl-block ' + (bk.co === 'hifive' ? 'tl-hf' : 'tl-hw');
-        bl.style.left  = leftPct + '%';
-        bl.style.width = widthPct + '%';
-        bl.textContent = (bk.name || '') + '\uff08' + (bk.type || '') + '\uff09';
-        tr.appendChild(bl);
+      buildSegments(times).forEach(function(seg) {
+        var lane = 0;
+        while (laneEnds[lane] !== undefined && laneEnds[lane] > seg[0]) lane++;
+        laneEnds[lane] = seg[1];
+        blocks.push({ seg: seg, bk: bk, lane: lane });
       });
+    });
+
+    var numLanes = laneEnds.length || 1;
+    tr.style.height = (numLanes * LANE_H + 8) + 'px';
+
+    blocks.forEach(function(item) {
+      var seg = item.seg, bk = item.bk, lane = item.lane;
+      var leftPct  = ((seg[0] - TL_START) / TL_SPAN * 100).toFixed(4);
+      var widthPct = ((seg[1] - seg[0])   / TL_SPAN * 100).toFixed(4);
+      var bl = document.createElement('div');
+      bl.className = 'tl-block ' + (bk.co === 'hifive' ? 'tl-hf' : 'tl-hw');
+      bl.style.left   = leftPct + '%';
+      bl.style.width  = widthPct + '%';
+      bl.style.top    = (4 + lane * LANE_H) + 'px';
+      bl.style.height = (LANE_H - 6) + 'px';
+      bl.textContent  = (bk.name || '') + '（' + (bk.type || '') + '）';
+      tr.appendChild(bl);
     });
 
     bc.appendChild(tr);
