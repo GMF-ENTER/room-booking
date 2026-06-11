@@ -287,6 +287,24 @@ function updateSum() {
     : '<span style="font-size:11.5px;color:var(--text3)">\u672a\u9078\u629e</span>';
 }
 
+// 選択時間の間に抜けている時間帯があれば配列で返す（なければnull）
+function findTimeGap(times) {
+  if (!times || times.length < 2) return null;
+  function toMin(hhmm) {
+    var p = hhmm.trim().split(':');
+    return parseInt(p[0]) * 60 + parseInt(p[1]);
+  }
+  function toStr(min) {
+    return String(Math.floor(min/60)).padStart(2,'0') + ':' + String(min%60).padStart(2,'0');
+  }
+  var mins = times.map(toMin).sort(function(a,b){ return a-b; });
+  var missing = [];
+  for (var m = mins[0] + 30; m < mins[mins.length-1]; m += 30) {
+    if (mins.indexOf(m) < 0) missing.push(toStr(m));
+  }
+  return missing.length ? missing : null;
+}
+
 function submitBooking() {
   var nm = document.getElementById('f-name').value.trim();
   var em = document.getElementById('f-email').value.trim();
@@ -295,6 +313,21 @@ function submitBooking() {
   if (!S.times.length) { alert('\u6642\u9593\u5e2f\u3092\u9078\u629e\u3057\u3066\u304f\u3060\u3055\u3044'); return; }
   if (!nm)             { alert('\u304a\u540d\u524d\u3092\u5165\u529b\u3057\u3066\u304f\u3060\u3055\u3044'); return; }
   if (!em)             { alert('\u30e1\u30fc\u30eb\u30a2\u30c9\u30ec\u30b9\u3092\u5165\u529b\u3057\u3066\u304f\u3060\u3055\u3044'); return; }
+
+  // 飛び選択（間の時間が抜けている）を検知して確認
+  var gap = findTimeGap(S.times);
+  if (gap) {
+    var ok = confirm(
+      '\u9078\u629e\u3057\u305f\u6642\u9593\u306e\u9593\u306b\u3001\u9078\u629e\u3055\u308c\u3066\u3044\u306a\u3044\u6642\u9593\u5e2f\u304c\u3042\u308a\u307e\u3059\u3002\n\n' +
+      '\u3010\u9078\u629e\u4e2d\u3011' + S.times.slice().sort().join(', ') + '\n' +
+      '\u3010\u672a\u9078\u629e\u3011' + gap.join(', ') + '\n\n' +
+      '\u3053\u306e\u307e\u307e\u3060\u3068\u3001\u4e0a\u8a18\u306e\u3010\u672a\u9078\u629e\u3011\u306e\u6642\u9593\u306f\u4e88\u7d04\u3055\u308c\u305a\u3001\u4ed6\u306e\u65b9\u304c\u4e88\u7d04\u3067\u304d\u308b\u72b6\u614b\u306b\u306a\u308a\u307e\u3059\u3002\n' +
+      '\u9023\u7d9a\u3057\u3066\u4f7f\u7528\u3059\u308b\u5834\u5408\u306f\u300c\u30ad\u30e3\u30f3\u30bb\u30eb\u300d\u3092\u62bc\u3057\u3066\u9593\u306e\u6642\u9593\u3082\u9078\u629e\u3057\u3066\u304f\u3060\u3055\u3044\u3002\n\n' +
+      '\u3053\u306e\u307e\u307e\u9032\u3081\u307e\u3059\u304b\uff1f'
+    );
+    if (!ok) return;
+  }
+
   var s = S.times.slice().sort();
   document.getElementById('modalBody').innerHTML =
     '<strong>' + ROOMS[S.room].name + '</strong><br>' +
@@ -346,24 +379,59 @@ function confirmBooking() {
     pax:   document.getElementById('f-pax').value,
     type:  document.getElementById('f-type').value
   };
-  saveBooking(booking, function(result) {
-    if (result && result.status === 'ok') {
-      sendConfirmEmail(booking);
+
+  // 保存前に最新データを再取得して二重予約を最終チェック
+  loadBookings(function() {
+    var conflict = checkConflict(booking);
+    if (conflict) {
+      var t = document.getElementById('toast');
+      t.style.borderColor = 'var(--hf-red)';
+      t.style.color = 'var(--hf-red)';
+      t.textContent = '\u26a0\ufe0f \u3053\u306e\u6642\u9593\u5e2f\u306f\u305f\u3060\u4eca\u4ed6\u306e\u65b9\u304c\u4e88\u7d04\u3057\u307e\u3057\u305f\u3002\u753b\u9762\u3092\u66f4\u65b0\u3057\u3066\u5225\u306e\u6642\u9593\u3092\u9078\u3093\u3067\u304f\u3060\u3055\u3044\u3002';
+      t.classList.add('show');
+      setTimeout(function(){
+        t.classList.remove('show');
+        t.style.borderColor = '#4ade80';
+        t.style.color = '#4ade80';
+      }, 5000);
+      // 時間帯表示を最新化
+      buildTG();
+      return;
     }
-    S.times = []; S.room = null;
-    var pills = document.querySelectorAll('.rpill');
-    for (var i = 0; i < pills.length; i++) pills[i].classList.remove('active');
-    buildTG(); updateSum();
-    ['f-name','f-note','f-email'].forEach(function(id) {
-      var el = document.getElementById(id); if (el) el.value = '';
+    // 重複なし → 保存
+    saveBooking(booking, function(result) {
+      if (result && result.status === 'ok') {
+        sendConfirmEmail(booking);
+      }
+      S.times = []; S.room = null;
+      var pills = document.querySelectorAll('.rpill');
+      for (var i = 0; i < pills.length; i++) pills[i].classList.remove('active');
+      buildTG(); updateSum();
+      ['f-name','f-note','f-email'].forEach(function(id) {
+        var el = document.getElementById(id); if (el) el.value = '';
+      });
+      var t = document.getElementById('toast');
+      t.textContent = (result && result.status === 'ok')
+        ? '\u2705 \u4e88\u7d04\u304c\u5b8c\u4e86\u3057\u307e\u3057\u305f\uff01\u78ba\u8a8d\u30e1\u30fc\u30eb\u3092\u9001\u4fe1\u3057\u307e\u3057\u305f\u3002'
+        : '\u26a0\ufe0f \u4fdd\u5b58\u306b\u5931\u6557\u3057\u307e\u3057\u305f';
+      t.classList.add('show');
+      setTimeout(function(){ t.classList.remove('show'); }, 3600);
     });
-    var t = document.getElementById('toast');
-    t.textContent = (result && result.status === 'ok')
-      ? '\u2705 \u4e88\u7d04\u304c\u5b8c\u4e86\u3057\u307e\u3057\u305f\uff01\u78ba\u8a8d\u30e1\u30fc\u30eb\u3092\u9001\u4fe1\u3057\u307e\u3057\u305f\u3002'
-      : '\u26a0\ufe0f \u4fdd\u5b58\u306b\u5931\u6557\u3057\u307e\u3057\u305f';
-    t.classList.add('show');
-    setTimeout(function(){ t.classList.remove('show'); }, 3600);
   });
+}
+
+// 同じ部屋・同じ日付で時間帯が重複していないかチェック
+function checkConflict(booking) {
+  var newTimes = booking.times.map(function(t){ return t.trim(); });
+  var conflict = false;
+  S.bookings.forEach(function(bk) {
+    if (bk.room !== booking.room || bk.date !== booking.date) return;
+    var existingTimes = getTimes(bk).map(function(t){ return t.trim(); });
+    newTimes.forEach(function(nt) {
+      if (existingTimes.indexOf(nt) >= 0) conflict = true;
+    });
+  });
+  return conflict;
 }
 
 // ── キャンセル ──
@@ -507,6 +575,27 @@ function buildTL(dateStr) {
     return parseInt(p[0]) * 60 + parseInt(p[1]);
   }
 
+  // 連続したスロットをまとめて [開始分, 終了分] のセグメント配列にする
+  function buildSegments(times) {
+    var mins = times.map(toMin).sort(function(a,b){ return a-b; });
+    var segs = [];
+    var segStart = mins[0];
+    var prev = mins[0];
+    for (var i = 1; i < mins.length; i++) {
+      if (mins[i] === prev + 30) {
+        // 連続
+        prev = mins[i];
+      } else {
+        // 途切れた → セグメント確定
+        segs.push([segStart, prev + 30]);
+        segStart = mins[i];
+        prev = mins[i];
+      }
+    }
+    segs.push([segStart, prev + 30]);
+    return segs;
+  }
+
   var corner = document.createElement('div');
   corner.className = 'tl-corner';
   corner.textContent = '\u90e8\u5c4b';
@@ -533,23 +622,27 @@ function buildTL(dateStr) {
     var bc = document.createElement('div'); bc.className = 'tl-bcell';
     var tr = document.createElement('div'); tr.className = 'tl-track';
 
-    S.bookings.forEach(function(bk) {
-      if (bk.room !== rk || bk.date !== dateStr) return;
-      var times = getTimes(bk).map(function(t){ return t.trim(); }).sort();
-      if (!times.length) return;
+    // この部屋・この日の予約を収集
+    var dayBookings = S.bookings.filter(function(bk) {
+      return bk.room === rk && bk.date === dateStr && getTimes(bk).length > 0;
+    });
 
-      var startMin = toMin(times[0]);
-      var endMin   = toMin(times[times.length - 1]) + 30; // 最後のスロット+30分
-
-      var leftPct  = ((startMin - TL_START) / TL_SPAN * 100).toFixed(4);
-      var widthPct = ((endMin   - startMin) / TL_SPAN * 100).toFixed(4);
-
-      var bl = document.createElement('div');
-      bl.className = 'tl-block ' + (bk.co === 'hifive' ? 'tl-hf' : 'tl-hw');
-      bl.style.left  = leftPct + '%';
-      bl.style.width = widthPct + '%';
-      bl.textContent = (bk.name || '') + '\uff08' + (bk.type || '') + '\uff09';
-      tr.appendChild(bl);
+    // 重複検出：各予約が占める分の集合
+    dayBookings.forEach(function(bk) {
+      var times = getTimes(bk).map(function(t){ return t.trim(); });
+      var segs = buildSegments(times);
+      segs.forEach(function(seg) {
+        var startMin = seg[0];
+        var endMin   = seg[1];
+        var leftPct  = ((startMin - TL_START) / TL_SPAN * 100).toFixed(4);
+        var widthPct = ((endMin   - startMin) / TL_SPAN * 100).toFixed(4);
+        var bl = document.createElement('div');
+        bl.className = 'tl-block ' + (bk.co === 'hifive' ? 'tl-hf' : 'tl-hw');
+        bl.style.left  = leftPct + '%';
+        bl.style.width = widthPct + '%';
+        bl.textContent = (bk.name || '') + '\uff08' + (bk.type || '') + '\uff09';
+        tr.appendChild(bl);
+      });
     });
 
     bc.appendChild(tr);
