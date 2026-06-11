@@ -328,11 +328,18 @@ function submitBooking() {
     if (!ok) return;
   }
 
-  var s = S.times.slice().sort();
+  var segs = buildSegments(S.times.slice());
+  var nums = ['\u2460','\u2461','\u2462','\u2463','\u2464'];
+  var timeStr = segs.map(function(seg, i) {
+    var startStr = String(Math.floor(seg[0]/60)).padStart(2,'0') + ':' + String(seg[0]%60).padStart(2,'0');
+    var endStr   = String(Math.floor(seg[1]/60)).padStart(2,'0') + ':' + String(seg[1]%60).padStart(2,'0');
+    var prefix = segs.length > 1 ? ('\u23f1 ' + (nums[i] || (i+1) + '.') + ' ') : '\u23f1 ';
+    return prefix + startStr + ' \u301c ' + endStr;
+  }).join('<br>');
   document.getElementById('modalBody').innerHTML =
     '<strong>' + ROOMS[S.room].name + '</strong><br>' +
     '\ud83d\udcc5 ' + fmtDate(S.date) + '<br>' +
-    '\u23f1 ' + s[0] + ' \u301c ' + addMinutes(s[s.length-1], 30) + '<br>' +
+    timeStr + '<br>' +
     '\ud83c\udfe2 ' + (S.co === 'hifive' ? 'HIGH FIVE' : 'HIGHWAY PLANET') + ' / ' + nm +
     '\uff08' + document.getElementById('f-pax').value + '\u540d\uff09<br>' +
     '\ud83d\udccb ' + document.getElementById('f-type').value;
@@ -562,39 +569,37 @@ function initSched() {
   buildTL(todayStr);
 }
 
+function toMin(hhmm) {
+  var p = hhmm.trim().split(':');
+  return parseInt(p[0]) * 60 + parseInt(p[1]);
+}
+
+// 連続したスロットをまとめて [開始分, 終了分] のセグメント配列にする
+function buildSegments(times) {
+  var mins = times.map(toMin).sort(function(a,b){ return a-b; });
+  var segs = [];
+  var segStart = mins[0];
+  var prev = mins[0];
+  for (var i = 1; i < mins.length; i++) {
+    if (mins[i] === prev + 30) {
+      prev = mins[i];
+    } else {
+      segs.push([segStart, prev + 30]);
+      segStart = mins[i];
+      prev = mins[i];
+    }
+  }
+  segs.push([segStart, prev + 30]);
+  return segs;
+}
+
 function buildTL(dateStr) {
   var wrap = document.getElementById('tlGrid');
   wrap.innerHTML = '';
-  var TL_START = 9 * 60;    // 09:00
-  var TL_END   = 19 * 60 + 30;   // 19:30（バーが19:00でちょうど収まるよう余白）
-  var TL_SPAN  = TL_END - TL_START; // 630分
+  var TL_START = 9 * 60;
+  var TL_END   = 19 * 60 + 30;
+  var TL_SPAN  = TL_END - TL_START;
   var TL_LABELS = ['09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00'];
-
-  function toMin(hhmm) {
-    var p = hhmm.trim().split(':');
-    return parseInt(p[0]) * 60 + parseInt(p[1]);
-  }
-
-  // 連続したスロットをまとめて [開始分, 終了分] のセグメント配列にする
-  function buildSegments(times) {
-    var mins = times.map(toMin).sort(function(a,b){ return a-b; });
-    var segs = [];
-    var segStart = mins[0];
-    var prev = mins[0];
-    for (var i = 1; i < mins.length; i++) {
-      if (mins[i] === prev + 30) {
-        // 連続
-        prev = mins[i];
-      } else {
-        // 途切れた → セグメント確定
-        segs.push([segStart, prev + 30]);
-        segStart = mins[i];
-        prev = mins[i];
-      }
-    }
-    segs.push([segStart, prev + 30]);
-    return segs;
-  }
 
   var corner = document.createElement('div');
   corner.className = 'tl-corner';
